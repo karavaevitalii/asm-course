@@ -29,10 +29,10 @@ void* memcpy(void* dest, void const* src, size_t count)
     __m128i tmp;
     __asm__ volatile(
     "1:"
-         "movdqu    (%[dest]),   %[tmp]  \n"
+         "movdqu    (%[dest]),   %[tmp] \n"
          "movntdq   %[tmp],     (%[src])\n"
 
-         "add       %[step],    %[dest]  \n"
+         "add       %[step],    %[dest] \n"
          "add       %[step],    %[src]  \n"
          "sub       %[step],    %[times]\n"
 
