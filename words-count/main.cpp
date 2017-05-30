@@ -1,7 +1,9 @@
 #include <string>
 #include <assert.h>
 #include <random>
-#include "smmintrin.h"
+#include <emmintrin.h>
+#include <chrono>
+#include <iostream>
 
 size_t naive_count(std::string const& str)
 {
@@ -87,7 +89,7 @@ size_t count(std::string const& str)
 
 std::string get_random_string(size_t limit)
 {
-    static char const alphabet[] = " a b c d e f g h i j k l m n o p q r s t u v w x y z ";
+    static char const alphabet[] = "ab cd ef gh ij kl mn op qr st uv wx yz";
     static size_t const max_index = sizeof alphabet;
 
     static std::random_device rd;
@@ -97,17 +99,45 @@ std::string get_random_string(size_t limit)
     std::string ret;
 
     for (size_t i = 0; i != limit; ++i)
-        ret += alphabet[dist(gen)];
+        ret.push_back(alphabet[dist(gen)]);
 
     return ret;
 }
 
 int main()
 {
-    for (size_t i = 0; i != 100; ++i)
     {
-        std::string s = get_random_string(100000);
-        assert(naive_count(s) == count(s));
+        for (size_t i = 0; i != 100; ++i)
+        {
+            std::string s = get_random_string(100000);
+            assert(naive_count(s) == count(s));
+        }
+    }
+
+    {
+        std::string s = get_random_string(100000000);
+        size_t naive, fast;
+
+        std::cout << "counting " << static_cast<double>(s.size()) / 1000000000. << " Gb:" << std::endl;
+
+        using clock_t = std::chrono::high_resolution_clock;
+        {
+            auto start = clock_t::now();
+            naive = naive_count(s);
+            auto end = clock_t::now();
+
+            std::cout << "naive: " << static_cast<double>((end - start).count()) / 1000000000. << " second(s)" << std::endl;
+        }
+
+        {
+            auto start = clock_t::now();
+            fast = count(s);
+            auto end = clock_t::now();
+
+            std::cout << "fast: " << static_cast<double>((end - start).count()) / 1000000000. << " second(s)" << std::endl;
+        }
+
+        assert(naive == fast);
     }
 
     return 0;
