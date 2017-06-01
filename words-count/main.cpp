@@ -10,35 +10,50 @@ size_t naive_count(std::string const& str)
     size_t count = 0;
     bool is_previous_space = true;
 
-    for (auto i = str.cbegin(); i != str.cend(); ++i)
+    for (size_t i = 0; i != str.size(); ++i)
     {
-        if (*i == ' ' && !is_previous_space)
+        if (str[i] == ' ' && !is_previous_space)
             ++count;
 
-        is_previous_space = (*i == ' ');
+        is_previous_space = (str[i] == ' ');
     }
 
     return count + !is_previous_space;
 }
 
+//size_t naive_count(std::string const& str)
+//{
+//    size_t count = 0;
+//    bool is_previous_space = true;
+
+//    for (auto i = str.begin(); i != str.end(); ++i)
+//    {
+//        if (*i == ' ' && !is_previous_space)
+//            ++count;
+
+//        is_previous_space = (*i == ' ');
+//    }
+
+//    return count + !is_previous_space;
+//}
+
 size_t calc_and_flush(__m128i& src)
 {
-    static size_t const limit = sizeof(__m128i);
+    __m128i value = _mm_setzero_si128();
+    value = _mm_sad_epu8(value, src);
 
-    size_t ret = 0;
-    for (size_t i = 0; i != limit; ++i)
-        ret += reinterpret_cast<uint8_t*>(&src)[i];
-    ret /= 49;
+    uint64_t low  = reinterpret_cast<uint64_t*>(&value)[0];
+    uint64_t high = reinterpret_cast<uint64_t*>(&value)[1];
 
     src = _mm_setzero_si128();
-    return ret;
+    return low + high;
 }
 
 size_t count(std::string const& str)
 {
     static size_t  const step       = sizeof(__m128i);
     static __m128i const space_mask = _mm_set1_epi8(' ');
-    static __m128i const one_mask   = _mm_set1_epi8('1');
+    static __m128i const one_mask   = _mm_set1_epi8('\001');
 
     size_t position = 0;
     while (str[position] == ' ')
@@ -57,16 +72,18 @@ size_t count(std::string const& str)
 
     uint8_t flush_cnt = 0;
     __m128i result = _mm_setzero_si128();
-    for (; position <= str.size() - step; position += 16)
+    for (; position <= str.size() - step; position += step)
     {
         __m128i spaces          = _mm_cmpeq_epi8(_mm_load_si128(reinterpret_cast<__m128i const*>(data + position)), space_mask);
         __m128i shifted_spaces  = _mm_cmpeq_epi8(_mm_loadu_si128(reinterpret_cast<__m128i const*>(data + position - 1)), space_mask);
         __m128i words           = _mm_and_si128(_mm_andnot_si128(shifted_spaces, spaces), one_mask);
 
         result = _mm_add_epi8(result, words);
+        /*if (_mm_movemask_epi8(result))
+            count += calc_and_flush(result);*/
 
         ++flush_cnt;
-        if (flush_cnt == 5)
+        if (flush_cnt == 255)
         {
             count += calc_and_flush(result);
             flush_cnt = 0;
