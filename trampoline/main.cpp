@@ -1,4 +1,4 @@
-#include <cassert>
+#include <assert.h>
 
 #include "trampoline.h"
 
@@ -162,13 +162,22 @@ void simple_test()
         assert(p(6) == tr(6));
         assert(p(6) == b + 6);
     }
+
 }
 
-#include <iostream>
+int f(int a, int b, int c, double d, int e, int g, int h, int i)
+{
+    return a + b + c + static_cast<int>(d) + e + g + h + i;
+}
 
 int main()
 {
     simple_test();
+
+    trampoline<int (int, int, int, double, int, int, int, int)> tr(f);
+    assert(f);
+
+    assert(tr(1, 2, 3, 4., 5, 6, 7, 8) == f(1, 2, 3, 4., 5, 6, 7, 8));
 
     return 0;
 }

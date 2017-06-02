@@ -16,6 +16,7 @@ class trampoline<R (Args ...)>
     using func_ptr_t    = R     (*)(Args ...);
 
     void* func;
+    func_ptr_t fptr;
     void* code;
     caller_t caller;
     copier_t copier;
@@ -42,6 +43,7 @@ class trampoline<R (Args ...)>
     void clear()
     {
         func    = nullptr;
+        fptr    = nullptr;
         code    = nullptr;
         caller  = nullptr;
         copier  = nullptr;
@@ -51,6 +53,7 @@ class trampoline<R (Args ...)>
 public:
     trampoline()
         : func(nullptr)
+        , fptr(nullptr)
         , code(nullptr)
         , caller(nullptr)
         , copier(nullptr)
@@ -59,6 +62,7 @@ public:
 
     trampoline(trampoline const& that)
         : func(that.copier(that.func))
+        , fptr(that.fptr)
         , code(that.code)
         , caller(that.caller)
         , copier(that.copier)
@@ -67,6 +71,7 @@ public:
 
     trampoline(trampoline&& that)
         : func(std::move(that.func))
+        , fptr(std::move(that.fptr))
         , code(std::move(that.code))
         , caller(std::move(that.caller))
         , copier(std::move(that.copier))
@@ -75,9 +80,19 @@ public:
         that.clear();
     }
 
+    trampoline(func_ptr_t fptr)
+        : func(nullptr)
+        , fptr(std::move(fptr))
+        , code(nullptr)
+        , caller(nullptr)
+        , copier(nullptr)
+        , deleter(nullptr)
+    {}
+
     template <typename F>
     trampoline(F func)
         : func(new F(std::move(func)))
+        , fptr(nullptr)
         , caller(do_call<F>)
         , copier(do_copy<F>)
         , deleter(do_delete<F>)
@@ -117,14 +132,16 @@ public:
     template <typename F>
     trampoline& operator=(F&& func)
     {
-        trampoline tmp{func};
+        trampoline tmp{std::forward<F>(func)};
         swap(tmp);
         return *this;
     }
 
     trampoline& operator=(std::nullptr_t)
     {
-        deleter(func);
+        if (func)
+            deleter(func);
+
         clear();
         return *this;
     }
@@ -136,17 +153,23 @@ public:
 
     explicit operator bool() const
     {
-        return func != nullptr;
+        return func != nullptr || fptr != nullptr;
     }
 
     R operator()(Args ... args) const
     {
-        return caller(func, std::forward<Args>(args) ...);
+        if (func)
+            return caller(func, std::forward<Args>(args) ...);
+
+        return fptr(std::forward<Args>(args) ...);
     }
 
     R (*get() const)(Args ... arg)
     {
-        return reinterpret_cast<func_ptr_t const>(code);
+        if (func)
+            return reinterpret_cast<func_ptr_t const>(code);
+
+        return fptr;
     }
 
     ~trampoline()
@@ -157,9 +180,9 @@ public:
 
             int r = ::munmap(code, 4096);
             assert(r == 0);
-
-            clear();
         }
+
+        clear();
     }
 
     template <typename R0, typename ... Args0>
@@ -188,6 +211,7 @@ template <typename R0, typename ... Args0>
 void swap_impl(trampoline<R0 (Args0 ...)>& a, trampoline<R0 (Args0 ...)>& b)
 {
     std::swap(a.func, b.func);
+    std::swap(a.fptr, b.fptr);
     std::swap(a.code, b.code);
     std::swap(a.caller, b.caller);
     std::swap(a.copier, b.copier);
@@ -197,7 +221,7 @@ void swap_impl(trampoline<R0 (Args0 ...)>& a, trampoline<R0 (Args0 ...)>& b)
 template <typename R0, typename ... Args0>
 bool operator==(trampoline<R0 (Args0 ...)> const& a, std::nullptr_t)
 {
-    return a.func == nullptr;
+    return a.func == nullptr && a.fptr == nullptr;
 }
 
 template <typename R0, typename ... Args0>
