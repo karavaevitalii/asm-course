@@ -99,7 +99,7 @@ public:
     {   
         code = ::mmap(nullptr, 4096, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-        if (arguments<Args ...>::integral < 6)
+        if (integral_arguments<Args ...>::value < 6)
         {
             auto* ncode = reinterpret_cast<unsigned char*>(code);
 
