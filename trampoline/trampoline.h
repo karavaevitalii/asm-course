@@ -1,12 +1,8 @@
 #ifndef TRAMPOLINE_H
 #define TRAMPOLINE_H
 
-#include <sys/mman.h>
-
 #include <utility>
-#include <cassert>
 #include <array>
-#include <algorithm>
 
 #include "arguments.h"
 #include "allocator.h"
@@ -120,10 +116,11 @@ public:
           deleter{do_delete<F>}
     {   
         code = utils::allocator::get_instance().allocate();
-        handler_t handler(code);
+        handler_t handler{code};
 
         size_t const arguments_size = utils::integral_arguments<Args ...>::value;
-        //shift all arguments in registers and put given functional object at 1st place
+
+        //shift all arguments in registers and put given functional object at rdi
         if (arguments_size < 6)
         {
             for (size_t i = arguments_size; i != 0; --i)
@@ -158,7 +155,7 @@ public:
 
             auto* break_label = handler.ptr;
 
-            handler.ptr += 1;
+            ++handler.ptr;
             handler.write("\x48\x81\xc4", 8);                               //add   rsp 8
             handler.write("\x4c\x8c\x0c\x24");                              //mov   r9  [rsp]
             handler.write("\x4c\x89\x4c\x24\xf8");                          //mov   [rsp - 8] r9
@@ -188,7 +185,7 @@ public:
         : trampoline{}
     {}
 
-    trampoline& operator=(trampoline&& that) noexcept
+    trampoline& operator=(trampoline&& that)
     {
         swap(that);
         return *this;
@@ -214,7 +211,7 @@ public:
     trampoline(trampoline const&)               = delete;
     trampoline& operator=(trampoline const&)    = delete;
 
-    void swap(trampoline& that) noexcept
+    void swap(trampoline& that)
     {
         swap_impl(*this, that);
     }
@@ -250,7 +247,7 @@ public:
     }
 
     template <typename R0, typename ... Args0>
-    friend void swap_impl(trampoline<R0 (Args0 ...)>&, trampoline<R0 (Args0 ...)>&) noexcept;
+    friend void swap_impl(trampoline<R0 (Args0 ...)>&, trampoline<R0 (Args0 ...)>&);
 
     template <typename R0, typename ... Args0>
     friend bool operator==(trampoline<R0 (Args0 ...)> const&, std::nullptr_t) noexcept;
@@ -272,7 +269,7 @@ void swap(trampoline<R0 (Arg0 ...)>& a, trampoline<R0 (Arg0 ...)>& b) noexcept
 }
 
 template <typename R0, typename ... Args0>
-void swap_impl(trampoline<R0 (Args0 ...)>& a, trampoline<R0 (Args0 ...)>& b) noexcept
+void swap_impl(trampoline<R0 (Args0 ...)>& a, trampoline<R0 (Args0 ...)>& b)
 {
     using std::swap;
 
