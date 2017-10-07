@@ -5,8 +5,51 @@
 
 #include <utility>
 #include <cassert>
+#include <array>
+#include <algorithm>
 
 #include "arguments.h"
+#include "allocator.h"
+
+namespace
+{
+    struct handler_t
+    {
+        char* ptr;
+
+        constexpr static std::array<char const*, 5> const shifts = {
+            {"\x48\x89\xfe",
+            "\x48\x89\xf2",
+            "\x48\x89\xd1",
+            "\x49\x89\xc8",
+            "\x4d\x89\xc1"}
+        };
+
+        handler_t(void* ptr)
+            : ptr(static_cast<char*>(ptr))
+        {}
+
+        void write(std::string_view cmd)
+        {
+            for (auto i = cmd.begin(); i != cmd.end(); ++i)
+                *(ptr++) = *i;
+        }
+
+        void write(std::string_view cmd, void* obj)
+        {
+            write(cmd);
+            *reinterpret_cast<void**>(ptr) = obj;
+            ptr += sizeof(obj);
+        }
+
+        void write(std::string_view cmd, int32_t const imm)
+        {
+            write(cmd);
+            *reinterpret_cast<int32_t*>(ptr) = imm;
+            ptr += sizeof(imm);
+        }
+    };
+} //namespace
 
 template <typename T>
 class trampoline;
@@ -15,7 +58,6 @@ template <typename R, typename ... Args>
 class trampoline<R (Args ...)>
 {
     using caller_t      = R     (*)(void*, Args ...);
-    using copier_t      = void* (*)(void*);
     using deleter_t     = void  (*)(void*);
     using func_ptr_t    = R     (*)(Args ...);
 
@@ -23,7 +65,6 @@ class trampoline<R (Args ...)>
     func_ptr_t fptr;
     void* code;
     caller_t caller;
-    copier_t copier;
     deleter_t deleter;
 
     template <typename F>
@@ -38,35 +79,19 @@ class trampoline<R (Args ...)>
         delete static_cast<F*>(func);
     }
 
-    template <typename F>
-    static void* do_copy(void* func)
-    {
-        return new F(*static_cast<F*>(func));
-    }
-
     void clear() noexcept
     {
         func    = nullptr;
         fptr    = nullptr;
         code    = nullptr;
         caller  = nullptr;
-        copier  = nullptr;
         deleter = nullptr;
     }
 
 public:
     trampoline() noexcept
         : func{}, fptr{}, code{},
-          caller{}, copier{}, deleter{}
-    {}
-
-    trampoline(trampoline const& that)
-        : func{that.copier(that.func)},
-          fptr{that.fptr},
-          code{that.code},
-          caller{that.caller},
-          copier{that.copier},
-          deleter{that.deleter}
+          caller{}, deleter{}
     {}
 
     trampoline(trampoline&& that) noexcept
@@ -74,7 +99,6 @@ public:
           fptr{std::move(that.fptr)},
           code{std::move(that.code)},
           caller{std::move(that.caller)},
-          copier{std::move(that.copier)},
           deleter{std::move(that.deleter)}
     {
         that.clear();
@@ -85,7 +109,6 @@ public:
           fptr{std::move(fptr)},
           code{},
           caller{},
-          copier{},
           deleter{}
     {}
 
@@ -94,31 +117,70 @@ public:
         : func{new F(std::move(func))},
           fptr{},
           caller{do_call<F>},
-          copier{do_copy<F>},
           deleter{do_delete<F>}
     {   
-        code = ::mmap(nullptr, 4096, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        code = utils::allocator::get_instance().allocate();
+        handler_t handler(code);
 
-        if (integral_arguments<Args ...>::value < 6)
+        size_t const arguments_size = utils::integral_arguments<Args ...>::value;
+        //shift all arguments in registers and put given functional object at 1st place
+        if (arguments_size < 6)
         {
-            auto* ncode = reinterpret_cast<unsigned char*>(code);
+            for (size_t i = arguments_size; i != 0; --i)
+                handler.write(handler_t::shifts[i - 1]);
 
-            *ncode++ = 0x48;
-            *ncode++ = 0x89;
-            *ncode++ = 0xfe;
+            handler.write("\x48\xbf", this->func);                              //mov rdi this->func
+            handler.write("\x48\xb8", reinterpret_cast<void*>(&do_call<F>));    //mov rax do_call
+            handler.write("\xff\xe0");                                          //jmp rax
+        }
+        else
+        {
+            //save return address
+            handler.write("\x4c\x8b\x1c\x24");                              //mov   r11 [rsp]
 
-            *ncode++ = 0x48;
-            *ncode++ = 0xbf;
-            *reinterpret_cast<void**>(ncode) = this->func;
-            ncode += 8;
+            //shift arguments in registers
+            for (size_t i = 5; i != 0; i--)
+                handler.write(handler_t::shifts[i - 1]);
 
-            *ncode++ = 0x48;
-            *ncode++ = 0xb8;
-            *reinterpret_cast<void**>(ncode) = reinterpret_cast<void*>(&do_call<F>);
-            ncode += 8;
+            int32_t stack_size = (arguments_size - 6 + utils::floating_arguments<Args ...>::value) * 8;
 
-            *ncode++ = 0xFF;
-            *ncode++ = 0xE0;
+            //prepare stack for function call
+            handler.write("\x48\x89\xe0");                                  //mov   rax rsp
+            handler.write("\x48\x05", stack_size);                          //add   rax stack_size
+            handler.write("\x41\x51");                                      //push  r9
+            handler.write("\x48\x81\xc4", 8);                               //add   rsp 8
+
+            //placing arguments in stack
+            auto* label = handler.ptr;                                      //label for cycling
+
+            handler.write("\x48\x39\xe0");                                  //cmp   rax rsp
+            handler.write("\x74");                                          //je    break
+
+            auto* break_label = handler.ptr;
+
+            handler.ptr += 1;
+            handler.write("\x48\x81\xc4", 8);                               //add   rsp 8
+            handler.write("\x4c\x8c\x0c\x24");                              //mov   r9  [rsp]
+            handler.write("\x4c\x89\x4c\x24\xf8");                          //mov   [rsp - 8] r9
+
+            handler.write("\xeb");                                          //jmp   label
+
+            *handler.ptr = static_cast<char>(label - handler.ptr);
+            ++handler.ptr;
+            *break_label = static_cast<char>(handler.ptr - break_label - 1);//break:
+
+            //arguments are shifted, call the function
+            handler.write("\x4c\x89\x1c\x24");                              //mov   [rsp] r11
+            handler.write("\x48\x81\xec", stack_size + 8);                  //sub   rsp on_stack + 8
+            handler.write("\x48\xbf", this->func);                          //mov   rdi obj
+            handler.write("\x48\xb8", reinterpret_cast<void*>(&do_call<F>));//mov   rax caller
+            handler.write("\xff\xd0");                                      //call  rax
+
+            //restore stack
+            handler.write("\x41\x59");                                      //pop   r9
+            handler.write("\x4c\x8b\x9c\x24", stack_size);                  //mov   r11 [rsp + on_stack]
+            handler.write("\x4c\x89\x1c\x24");                              //mov   [rsp] r11
+            handler.write("\xc3");                                          //ret
         }
     }
 
@@ -126,7 +188,7 @@ public:
         : trampoline{}
     {}
 
-    trampoline& operator=(trampoline that) noexcept
+    trampoline& operator=(trampoline&& that) noexcept
     {
         swap(that);
         return *this;
@@ -149,6 +211,9 @@ public:
         return *this;
     }
 
+    trampoline(trampoline const&)               = delete;
+    trampoline& operator=(trampoline const&)    = delete;
+
     void swap(trampoline& that) noexcept
     {
         swap_impl(*this, that);
@@ -167,7 +232,7 @@ public:
         return fptr(std::forward<Args>(args) ...);
     }
 
-    R (*get() const)(Args ... arg) noexcept
+    R (*get() const)(Args ... arg)
     {
         if (func)
             return reinterpret_cast<func_ptr_t const>(code);
@@ -178,13 +243,9 @@ public:
     ~trampoline()
     {
         if (func)
-        {
             deleter(func);
 
-            int r = ::munmap(code, 4096);
-            assert(r == 0);
-        }
-
+        utils::allocator::get_instance().deallocate(code);
         clear();
     }
 
@@ -219,7 +280,6 @@ void swap_impl(trampoline<R0 (Args0 ...)>& a, trampoline<R0 (Args0 ...)>& b) noe
     swap(a.fptr, b.fptr);
     swap(a.code, b.code);
     swap(a.caller, b.caller);
-    swap(a.copier, b.copier);
     swap(a.deleter, b.deleter);
 }
 

@@ -4,82 +4,85 @@
 #include <cstdint>
 #include <type_traits>
 
-template <std::size_t N, bool B, typename ... Args>
-struct integral_arguments_counter;
-
-template <typename Arg, typename ... Args>
-struct integral_arguments
+namespace utils
 {
-    using args = integral_arguments_counter<sizeof... (Args), std::is_integral<Arg>::value, Args ...>;
+    template <std::size_t N, bool B, typename ... Args>
+    struct integral_arguments_counter;
 
-    constexpr static const std::size_t value = args::value;
-};
+    template <typename Arg, typename ... Args>
+    struct integral_arguments
+    {
+        using args = integral_arguments_counter<sizeof... (Args), std::is_integral<std::remove_reference_t<Arg>>::value, Args ...>;
 
-template <typename ... Args>
-struct integral_arguments_counter<0, true, Args ...>
-{
-    constexpr static const std::size_t value = 1;
-};
+        constexpr static std::size_t const value = args::value;
+    };
 
-template <typename ... Args>
-struct integral_arguments_counter<0, false, Args ...>
-{
-    constexpr static const std::size_t value = 0;
-};
+    template <typename ... Args>
+    struct integral_arguments_counter<0, true, Args ...>
+    {
+        constexpr static std::size_t const value = 1;
+    };
 
-template <std::size_t N, typename Arg, typename ... Args>
-struct integral_arguments_counter<N, true, Arg, Args ...>
-{
-    using args = integral_arguments_counter<N - 1, std::is_integral<Arg>::value, Args ...>;
+    template <typename ... Args>
+    struct integral_arguments_counter<0, false, Args ...>
+    {
+        constexpr static std::size_t const value = 0;
+    };
 
-    constexpr static const std::size_t value = args::value + 1;
-};
+    template <std::size_t N, typename Arg, typename ... Args>
+    struct integral_arguments_counter<N, true, Arg, Args ...>
+    {
+        using args = integral_arguments_counter<N - 1, std::is_integral<std::remove_reference_t<Arg>>::value, Args ...>;
 
-template <std::size_t N, typename Arg, typename ... Args>
-struct integral_arguments_counter<N, false, Arg, Args ...>
-{
-    using args = integral_arguments_counter<N - 1, std::is_integral<Arg>::value, Args ...>;
+        constexpr static std::size_t const value = args::value + 1;
+    };
 
-    constexpr static const std::size_t value = args::value;
-};
+    template <std::size_t N, typename Arg, typename ... Args>
+    struct integral_arguments_counter<N, false, Arg, Args ...>
+    {
+        using args = integral_arguments_counter<N - 1, std::is_integral<std::remove_reference_t<Arg>>::value, Args ...>;
 
-template <std::size_t N, bool B, typename ... Args>
-struct floating_arguments_counter;
+        constexpr static std::size_t const value = args::value;
+    };
 
-template <typename Arg, typename ... Args>
-struct floating_arguments
-{
-    using args = floating_arguments_counter<sizeof... (Args), !std::is_integral<Arg>::value, Args ...>;
+    template <std::size_t N, bool B, typename ... Args>
+    struct floating_arguments_counter;
 
-    constexpr static const std::size_t value = args::value;
-};
+    template <typename Arg, typename ... Args>
+    struct floating_arguments
+    {
+        using args = floating_arguments_counter<sizeof... (Args), !std::is_integral<std::remove_reference_t<Arg>>::value, Args ...>;
 
-template <typename ... Args>
-struct floating_arguments_counter<0, true, Args ...>
-{
-    constexpr static const std::size_t value = 1;
-};
+        constexpr static std::size_t const value = args::value;
+    };
 
-template <typename ... Args>
-struct floating_arguments_counter<0, false, Args ...>
-{
-    constexpr static const std::size_t value = 0;
-};
+    template <typename ... Args>
+    struct floating_arguments_counter<0, true, Args ...>
+    {
+        constexpr static std::size_t const value = 1;
+    };
 
-template <std::size_t N, typename Arg, typename ... Args>
-struct floating_arguments_counter<N, true, Arg, Args ...>
-{
-    using args = floating_arguments_counter<N - 1, !std::is_integral<Arg>::value, Args ...>;
+    template <typename ... Args>
+    struct floating_arguments_counter<0, false, Args ...>
+    {
+        constexpr static std::size_t const value = 0;
+    };
 
-    constexpr static const std::size_t value = args::value + 1;
-};
+    template <std::size_t N, typename Arg, typename ... Args>
+    struct floating_arguments_counter<N, true, Arg, Args ...>
+    {
+        using args = floating_arguments_counter<N - 1, !std::is_integral<std::remove_reference_t<Arg>>::value, Args ...>;
 
-template <std::size_t N, typename Arg, typename ... Args>
-struct floating_arguments_counter<N, false, Arg, Args ...>
-{
-    using args = floating_arguments_counter<N - 1, !std::is_integral<Arg>::value, Args ...>;
+        constexpr static std::size_t const value = args::value + 1;
+    };
 
-    constexpr static const std::size_t value = args::value;
-};
+    template <std::size_t N, typename Arg, typename ... Args>
+    struct floating_arguments_counter<N, false, Arg, Args ...>
+    {
+        using args = floating_arguments_counter<N - 1, !std::is_integral<std::remove_reference_t<Arg>>::value, Args ...>;
+
+        constexpr static std::size_t const value = args::value;
+    };
+} //namespace utils
 
 #endif // ARGUMENTS_H
